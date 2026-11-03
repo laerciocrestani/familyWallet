@@ -2,10 +2,12 @@ FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
-
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# O DNS da VCN da Oracle falha dentro do build. Estes resolvers respondem.
+RUN printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf \
+    && corepack enable \
+    && corepack prepare pnpm@10.33.0 --activate \
+    && pnpm install --frozen-lockfile
 
 COPY . .
 RUN pnpm build
@@ -19,10 +21,11 @@ ENV NODE_ENV=production \
     PORT=8787 \
     DATA_DIR=/data
 
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
-
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+RUN printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf \
+    && corepack enable \
+    && corepack prepare pnpm@10.33.0 --activate \
+    && pnpm install --frozen-lockfile --prod
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
