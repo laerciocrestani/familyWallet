@@ -29,7 +29,7 @@ docker compose up -d --build
 
 Abra `http://127.0.0.1:8787`. O container escuta em `0.0.0.0:8787` e a porta publicada fica só em `127.0.0.1`. O SQLite fica no volume `family_data`.
 
-Na Oracle o app sobe no container próprio `family-wallet`, na rede `web` que já existe. Cada push em `main` roda o Action `.github/workflows/deploy.yml`: testa, envia o código e executa `docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d --build`. A imagem é arm64, construída na VPS. A porta publicada lá também é `127.0.0.1:8787`.
+Na Oracle o app sobe no container próprio `family-wallet`, na rede `web` que já existe. Cada push em `main` roda o Action `.github/workflows/deploy.yml`: testa, constrói a imagem arm64 e a VPS só faz o pull. A porta publicada lá também é `127.0.0.1:8787`.
 
 `HOST` e `DATA_DIR` do `.env` valem para `pnpm dev` e `pnpm start`. Dentro do Compose eles são `0.0.0.0` e `/data`.
 
