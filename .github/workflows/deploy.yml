@@ -1,0 +1,81 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-oracle
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enviar o projeto e subir o container
+        env:
+          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          AURUM_TOKEN: ${{ secrets.AURUM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY"
+          test -n "$ORACLE_HOST"
+          test -n "$ORACLE_USER"
+          test -n "$AURUM_TOKEN"
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$ORACLE_HOST" >> ~/.ssh/known_hosts
+
+          ssh_cmd="ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes"
+          target="$ORACLE_USER@$ORACLE_HOST"
+          remote_dir="/home/ubuntu/family-wallet"
+
+          $ssh_cmd "$target" "mkdir -p '$remote_dir'"
+
+          tar -czf - \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude dist \
+            --exclude data \
+            --exclude .env \
+            . | $ssh_cmd "$target" "tar -xzf - -C '$remote_dir'"
+
+          umask 077
+          cat > /tmp/family.env << EOF
+          AURUM_TOKEN=$AURUM_TOKEN
+          PORT=8787
+          HOST=127.0.0.1
+          DATA_DIR=data
+          EOF
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes /tmp/family.env "$target:$remote_dir/.env"
+          rm -f /tmp/family.env
+
+          $ssh_cmd "$target" "cd '$remote_dir' && chmod 600 .env && docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d --build --wait && curl -fsS http://127.0.0.1:8787/api/health"

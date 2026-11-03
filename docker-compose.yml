@@ -1,0 +1,18 @@
+services:
+  family-wallet:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8787"
+      DATA_DIR: /data
+    ports:
+      - "127.0.0.1:${PORT:-8787}:8787"
+    volumes:
+      - family_data:/data
+
+volumes:
+  family_data:

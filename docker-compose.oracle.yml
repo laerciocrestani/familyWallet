@@ -1,0 +1,20 @@
+# Overlay da VPS Oracle (aarch64). A rede `web` já existe lá, com o PHP, o MariaDB e o Postgres.
+services:
+  family-wallet:
+    platform: linux/arm64
+    container_name: family-wallet
+    init: true
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web:
+    external: true
+    name: web

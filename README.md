@@ -17,14 +17,21 @@ pnpm dev
 
 A tela sobe em `http://127.0.0.1:5173` e a API em `http://127.0.0.1:8787`. No navegador, informe o mesmo token. Ele fica só na aba.
 
-Produção, na sua máquina ou no servidor:
+## Docker
+
+Na máquina local:
 
 ```bash
-pnpm build
-pnpm start
+cp .env.example .env
+# edite AURUM_TOKEN
+docker compose up -d --build
 ```
 
-`pnpm start` serve a tela e a API no mesmo processo. Para escutar fora de localhost, defina `HOST=0.0.0.0`.
+Abra `http://127.0.0.1:8787`. O container escuta em `0.0.0.0:8787` e a porta publicada fica só em `127.0.0.1`. O SQLite fica no volume `family_data`.
+
+Na Oracle o app sobe no container próprio `family-wallet`, na rede `web` que já existe. Cada push em `main` roda o Action `.github/workflows/deploy.yml`: testa, envia o código e executa `docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d --build`. A imagem é arm64, construída na VPS. A porta publicada lá também é `127.0.0.1:8787`.
+
+`HOST` e `DATA_DIR` do `.env` valem para `pnpm dev` e `pnpm start`. Dentro do Compose eles são `0.0.0.0` e `/data`.
 
 ## Rotas
 
