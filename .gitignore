@@ -5,3 +5,4 @@ data
 .env.local
 *.sqlite
 .DS_Store
+proxy/certs

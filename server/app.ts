@@ -3,7 +3,7 @@ import { serveStatic } from "@hono/node-server/serve-static"
 import { Hono } from "hono"
 import type { DatabaseSync } from "node:sqlite"
 import { snapshotIssues, snapshotSchema } from "../shared/snapshot.ts"
-import { insertSnapshot, latestSnapshot } from "./db.ts"
+import { insertSnapshot, latestInRange, latestSnapshot } from "./db.ts"
 
 const MAX_BODY = 1_000_000
 
@@ -68,6 +68,8 @@ export function createApp(options: {
 
   app.get("/api/aurum/snapshot", (c) => {
     const month = c.req.query("month")
+    const from = c.req.query("from")
+    const to = c.req.query("to")
     if (month !== undefined && !/^\d{4}-\d{2}$/.test(month)) {
       return c.json(
         {
@@ -76,6 +78,32 @@ export function createApp(options: {
         },
         400,
       )
+    }
+    if (from !== undefined || to !== undefined) {
+      if (
+        from === undefined ||
+        to === undefined ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(to) ||
+        from > to
+      ) {
+        return c.json(
+          {
+            error: "invalid",
+            issues: [{ path: "from", message: "use from e to em AAAA-MM-DD" }],
+          },
+          400,
+        )
+      }
+      const stored = latestInRange(options.db, from, to)
+      if (stored.length === 0) return c.json({ error: "empty" }, 404)
+      return c.json({
+        snapshots: stored.map((item) => ({
+          id: item.id,
+          received_at: item.receivedAt,
+          snapshot: item.snapshot,
+        })),
+      })
     }
     const stored = latestSnapshot(options.db, month ?? null)
     if (!stored) return c.json({ error: "empty" }, 404)

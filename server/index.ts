@@ -10,7 +10,7 @@ if (!token) {
 }
 
 const dataDir = process.env.DATA_DIR?.trim() || "data"
-const port = Number(process.env.PORT || 8787)
+const port = Number(process.env.PORT || 8788)
 const host = process.env.HOST?.trim() || "127.0.0.1"
 const db = openDatabase(path.join(dataDir, "family.sqlite"))
 const app = createApp({

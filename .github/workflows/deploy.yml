@@ -96,7 +96,7 @@ jobs:
           umask 077
           cat > /tmp/family.env << EOF
           AURUM_TOKEN=$AURUM_TOKEN
-          PORT=8787
+          PORT=8788
           HOST=127.0.0.1
           DATA_DIR=data
           EOF
@@ -104,4 +104,4 @@ jobs:
           rm -f /tmp/family.env
 
           printf '%s' "$GHCR_TOKEN" | $ssh_cmd "$target" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-          $ssh_cmd "$target" "cd '$remote_dir' && chmod 600 .env && docker compose -f docker-compose.yml -f docker-compose.oracle.yml pull && docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d --no-build --wait && docker logout ghcr.io && curl -fsS http://127.0.0.1:8787/api/health"
+          $ssh_cmd "$target" "cd '$remote_dir' && chmod 600 .env && docker compose -f docker-compose.yml -f docker-compose.oracle.yml pull && docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d --no-build --wait && docker logout ghcr.io && curl -fsS http://127.0.0.1:8788/api/health"

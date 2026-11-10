@@ -62,3 +62,29 @@ export function latestSnapshot(db: DatabaseSync, month: string | null) {
     snapshot: JSON.parse(row.body) as Snapshot,
   }
 }
+
+export function latestInRange(db: DatabaseSync, from: string, to: string) {
+  const rows = db
+    .prepare(
+      `SELECT s.id, s.received_at, s.body
+       FROM snapshots s
+       INNER JOIN (
+         SELECT MAX(id) AS id
+         FROM snapshots
+         WHERE month >= ? AND month <= ?
+         GROUP BY month
+       ) latest ON latest.id = s.id
+       ORDER BY s.month`,
+    )
+    .all(from.slice(0, 7), to.slice(0, 7)) as {
+    id: number
+    received_at: string
+    body: string
+  }[]
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    receivedAt: row.received_at,
+    snapshot: JSON.parse(row.body) as Snapshot,
+  }))
+}

@@ -1,0 +1,19 @@
+# Proxy só na Oracle. Usa a rede do host para o firewall (rules.v4) valer
+# nas portas 80 e 443, e encaminha para o app em 127.0.0.1:8788.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: family-proxy
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    mem_limit: 64m
+    cpus: 0.25
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/etc/caddy/certs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

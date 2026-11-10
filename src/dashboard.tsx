@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useState } from "react"
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts"
-import { LogOut, RefreshCw, Wallet } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  LabelList,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
+  XAxis,
+} from "recharts"
+import { CalendarIcon, ChevronLeft, ChevronRight, LogOut, RefreshCw, Wallet } from "lucide-react"
+import type { DateRange } from "react-day-picker"
+import { ptBR } from "react-day-picker/locale"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,6 +25,8 @@ import {
 } from "@/components/ui/card"
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -24,6 +38,9 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Calendar } from "@/components/ui/calendar"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -34,14 +51,441 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { fetchSnapshot, type SnapshotResponse } from "@/lib/api"
+import { cn } from "cn"
+import { FourBoxes } from "@/four-boxes"
+import { fetchRange, type SnapshotResponse } from "@/lib/api"
+import { boxUsed, displayCeiling, orderedBoxes } from "@/lib/boxes"
+import { isFamilyCard, statementShare } from "@/lib/card-share"
+import {
+  cardMonthTotals,
+  chargesInMonth,
+  parcelParts,
+  projectSharedCards,
+} from "@/lib/cards"
+import { categoryRadarSet, type CategoryTotal } from "@/lib/categories"
 import { labelOf } from "@/lib/labels"
 import { formatBRL, formatDate, formatDateTime } from "@/lib/money"
+import {
+  currentMonth,
+  formatIsoDate,
+  formatMonth,
+  inRange,
+  isFullMonth,
+  monthBounds,
+  monthKey,
+  parseIsoDate,
+  shiftMonth,
+} from "@/lib/period"
+import type { Snapshot } from "@shared/snapshot"
 
 const chartConfig = {
   used: { label: "No mês", color: "var(--chart-1)" },
   ceiling: { label: "Teto", color: "var(--chart-2)" },
 } satisfies ChartConfig
+
+function parcelText(item: Installment) {
+  const parts = parcelParts(item)
+  if (parts) return `${parts.index}/${parts.count}`
+  if (item.remaining != null) return `${item.remaining}x`
+  return null
+}
+
+function isLastParcel(item: Installment) {
+  const parts = parcelParts(item)
+  return parts != null && parts.index === parts.count
+}
+
+function topSegmentKey(
+  row: Record<string, string | number | null>,
+  series: readonly { key: string }[],
+) {
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const value = row[series[index].key]
+    if (typeof value === "number" && value > 0) return series[index].key
+  }
+  return null
+}
+
+function moneyLabel(value: number) {
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
+function CardForecast({
+  cards,
+  month,
+}: {
+  cards: Snapshot["cards"]
+  month: string
+}) {
+  const projection = projectSharedCards(cards, month)
+  if (projection.series.length === 0) return null
+  const totals = cardMonthTotals(projection.rows, projection.series)
+  const config = Object.fromEntries(
+    projection.series.map((series, index) => [
+      series.key,
+      {
+        label: series.label,
+        color: `var(--chart-${(index % 5) + 1})`,
+      },
+    ]),
+  ) satisfies ChartConfig
+  const start = formatMonth(projection.rows[0].month)
+  const end = formatMonth(projection.rows[projection.rows.length - 1].month)
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="text-sm text-muted-foreground">
+        {start} – {end} · soma de todos os cartões
+        {projection.series.some((item) => item.label.endsWith("família"))
+          ? " · no C6, a fatia da família é só a metade do mercado"
+          : ""}
+      </p>
+      <ChartContainer
+        config={config}
+        aria-label={`Projeção dos cartões de ${start} a ${end}`}
+        className="aspect-auto h-72 w-full"
+      >
+        <BarChart accessibilityLayer data={projection.rows} margin={{ top: 32 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis
+            dataKey="label"
+            tickLine={false}
+            tickMargin={10}
+            axisLine={false}
+          />
+          <ChartTooltip
+            cursor={false}
+            content={
+              <ChartTooltipContent
+                formatter={(value, name) => (
+                  <span className="flex w-full justify-between gap-4">
+                    <span className="text-muted-foreground">{String(name)}</span>
+                    <span className="font-mono font-medium tabular-nums">
+                      {formatBRL(Number(value))}
+                    </span>
+                  </span>
+                )}
+              />
+            }
+          />
+          <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
+          {projection.series.map((series, index) => (
+            <Bar
+              key={series.key}
+              dataKey={series.key}
+              name={series.label}
+              stackId="cards"
+              fill={`var(--color-${series.key})`}
+              radius={
+                index === 0
+                  ? [0, 0, 4, 4]
+                  : index === projection.series.length - 1
+                    ? [4, 4, 0, 0]
+                    : 0
+              }
+            >
+              <LabelList
+                content={({ x, y, width, index: rowIndex }) => {
+                  if (
+                    rowIndex == null ||
+                    x == null ||
+                    y == null ||
+                    width == null
+                  ) {
+                    return null
+                  }
+                  const row = projection.rows[rowIndex]
+                  const total = totals[rowIndex]?.total
+                  if (!row || !total) return null
+                  if (topSegmentKey(row, projection.series) !== series.key) {
+                    return null
+                  }
+                  return (
+                    <text
+                      x={Number(x) + Number(width) / 2}
+                      y={Number(y) - 8}
+                      textAnchor="middle"
+                      className="fill-foreground"
+                      fontSize={11}
+                    >
+                      {moneyLabel(total)}
+                    </text>
+                  )
+                }}
+              />
+            </Bar>
+          ))}
+        </BarChart>
+      </ChartContainer>
+    </div>
+  )
+}
+
+function CategoryRadarCard({
+  heading,
+  detail,
+  rows,
+  period,
+  color,
+  swatch,
+  compact = false,
+}: {
+  heading: string
+  detail: string
+  rows: CategoryTotal[]
+  period: string
+  color: string
+  swatch: string
+  compact?: boolean
+}) {
+  const points = rows.map((item) => ({
+    category: labelOf(item.category),
+    amount: item.amount,
+  }))
+  const ranked = [...points].sort(
+    (a, b) => b.amount - a.amount || a.category.localeCompare(b.category, "pt-BR"),
+  )
+  const total = points.reduce((sum, row) => cents(sum + row.amount), 0)
+  const config = {
+    amount: { label: "Gasto", color },
+  } satisfies ChartConfig
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{heading}</CardTitle>
+        <CardDescription>
+          {detail}
+          {points.length > 0 ? ` · ${formatBRL(total)}` : ""}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {points.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhum lançamento neste período.
+          </p>
+        ) : (
+          <div className="@container w-full">
+            <div
+              className={cn(
+                "flex w-full flex-col items-center gap-4",
+                compact
+                  ? "@min-[28rem]:flex-row @min-[28rem]:items-center"
+                  : "@3xl:flex-row @3xl:justify-center @3xl:gap-6",
+              )}
+            >
+              <ChartContainer
+                config={config}
+                aria-label={`Categorias de ${heading} em ${period}`}
+                className={cn(
+                  "aspect-square w-full [&_.recharts-polar-angle-axis-tick_text]:fill-muted-foreground",
+                  compact ? "max-w-72" : "max-w-sm",
+                )}
+              >
+                <RadarChart
+                  data={points}
+                  outerRadius="70%"
+                  margin={
+                    compact
+                      ? { top: 20, right: 76, bottom: 20, left: 76 }
+                      : { top: 28, right: 88, bottom: 28, left: 88 }
+                  }
+                >
+                  <ChartTooltip
+                    cursor={false}
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value) => (
+                          <span className="font-mono font-medium tabular-nums">
+                            {formatBRL(Number(value))}
+                          </span>
+                        )}
+                      />
+                    }
+                  />
+                  <PolarAngleAxis dataKey="category" />
+                  <PolarGrid />
+                  <Radar
+                    dataKey="amount"
+                    fill="var(--color-amount)"
+                    fillOpacity={0.6}
+                    stroke="var(--color-amount)"
+                    dot={{
+                      r: 4,
+                      fillOpacity: 1,
+                    }}
+                  />
+                </RadarChart>
+              </ChartContainer>
+              <ul
+                aria-label={`Valores de ${heading} em ${period}`}
+                className={cn(
+                  "flex w-full flex-col gap-2",
+                  compact ? "min-w-0 @min-[28rem]:flex-1" : "max-w-sm @3xl:w-64 @3xl:shrink-0",
+                )}
+              >
+                {ranked.map((row) => (
+                  <li
+                    key={row.category}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className={cn("size-2 shrink-0 rounded-full", swatch)} />
+                      <span className="truncate">{row.category}</span>
+                    </span>
+                    <span className="font-mono font-medium tabular-nums">
+                      {formatBRL(row.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function CategoryRadars({
+  transactions,
+  month,
+}: {
+  transactions: Snapshot["transactions"]
+  month: string
+}) {
+  const groups = categoryRadarSet(transactions)
+  const period = formatMonth(month)
+
+  return (
+    <>
+      <CategoryRadarCard
+        heading="Necessidades e desejos"
+        detail="Cruzamento geral dos gastos neste mês"
+        rows={groups.geral}
+        period={period}
+        color="var(--chart-1)"
+        swatch="bg-chart-1"
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <CategoryRadarCard
+          heading="Necessidades"
+          detail="Gastos de necessidades neste mês"
+          rows={groups.necessidades}
+          period={period}
+          color="var(--chart-2)"
+          swatch="bg-chart-2"
+          compact
+        />
+        <CategoryRadarCard
+          heading="Desejos"
+          detail="Gastos de desejos neste mês"
+          rows={groups.desejos}
+          period={period}
+          color="var(--chart-3)"
+          swatch="bg-chart-3"
+          compact
+        />
+      </div>
+    </>
+  )
+}
+
+function cents(value: number) {
+  return Math.round(value * 100) / 100
+}
+
+function AuthorshipShare({
+  card,
+  month,
+}: {
+  card: Snapshot["cards"][number]
+  month: string
+}) {
+  if (!isFamilyCard(card.name)) return null
+  const share = statementShare(
+    chargesInMonth(card, month, month),
+    card.statement,
+  )
+  const parts = [
+    {
+      key: "necessidades",
+      label: "Necessidades",
+      amount: share.mineNecessidades,
+      swatch: "bg-chart-2",
+    },
+    {
+      key: "demais",
+      label: "Demais, seus",
+      amount: share.mineOther,
+      swatch: "bg-chart-4",
+    },
+    {
+      key: "familia",
+      label: "Família",
+      amount: share.family,
+      swatch: "bg-foreground/25",
+    },
+  ]
+  const bar = parts.filter((part) => part.amount > 0)
+  const width = share.bank > 0 ? share.bank : 1
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-background p-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium">Minha autoria</p>
+        <p className="font-medium tabular-nums">{formatBRL(share.mine)}</p>
+      </div>
+      {bar.length > 0 ? (
+        <div
+          className="flex h-2 overflow-hidden rounded-full bg-muted"
+          aria-hidden="true"
+        >
+          {bar.map((part) => (
+            <div
+              key={part.key}
+              className={part.swatch}
+              style={{ width: `${(part.amount / width) * 100}%` }}
+            />
+          ))}
+        </div>
+      ) : null}
+      <ul className="flex flex-col gap-1 text-sm" aria-label="Rateio do C6">
+        {parts.map((part) => (
+          <li key={part.key} className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <span className={cn("size-2 rounded-full", part.swatch)} />
+              {part.label}
+            </span>
+            <span className="tabular-nums">{formatBRL(part.amount)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">
+        {share.grocery > 0
+          ? "Metade do mercado desta fatura entra em necessidades. A outra metade fica só aqui, fora das caixinhas."
+          : "Nenhum mercado nesta fatura. O valor inteiro é seu."}
+      </p>
+    </div>
+  )
+}
+
+function visibleInstallments(
+  card: Snapshot["cards"][number],
+  from: string,
+  to: string,
+) {
+  return (card.installments_open ?? []).filter(
+    (item) => item.date == null || inRange(item.date, from, to),
+  )
+}
+
+type Installment = NonNullable<
+  Snapshot["cards"][number]["installments_open"]
+>[number]
 
 function percent(used: number, ceiling: number) {
   if (ceiling <= 0) return 0
@@ -55,19 +499,25 @@ export function Dashboard({
   token: string
   onSignOut: () => void
 }) {
-  const [body, setBody] = useState<SnapshotResponse | null>(null)
+  const [period, setPeriod] = useState(() => monthBounds(currentMonth()))
+  const { from, to } = period
+  const [snapshots, setSnapshots] = useState<SnapshotResponse[]>([])
   const [status, setStatus] = useState<"loading" | "empty" | "ready" | "error">(
     "loading",
   )
 
+  const request = useRef(0)
+
   const load = useCallback(async () => {
-    const result = await fetchSnapshot(token)
+    const id = ++request.current
+    const result = await fetchRange(token, from, to)
+    if (id !== request.current) return
     if (result.kind === "unauthorized") {
       onSignOut()
       return
     }
     if (result.kind === "empty") {
-      setBody(null)
+      setSnapshots([])
       setStatus("empty")
       return
     }
@@ -75,9 +525,9 @@ export function Dashboard({
       setStatus("error")
       return
     }
-    setBody(result.body)
+    setSnapshots(result.snapshots)
     setStatus("ready")
-  }, [onSignOut, token])
+  }, [from, onSignOut, to, token])
 
   useEffect(() => {
     void load()
@@ -112,6 +562,17 @@ export function Dashboard({
         </div>
       </header>
 
+      <PeriodBar
+        from={from}
+        to={to}
+        onChange={(nextFrom, nextTo) => setPeriod({ from: nextFrom, to: nextTo })}
+        onShift={(delta) =>
+          setPeriod((current) =>
+            monthBounds(shiftMonth(monthKey(current.from), delta)),
+          )
+        }
+      />
+
       {status === "loading" ? <Loading /> : null}
       {status === "error" ? (
         <Alert variant="destructive">
@@ -122,7 +583,11 @@ export function Dashboard({
         </Alert>
       ) : null}
       {status === "empty" ? <Waiting /> : null}
-      {status === "ready" && body ? <Month body={body} /> : null}
+      {status === "ready"
+        ? snapshots.map((body) => (
+            <Month key={body.snapshot.month} body={body} from={from} to={to} />
+          ))
+        : null}
     </main>
   )
 }
@@ -144,31 +609,142 @@ function Waiting() {
         <EmptyMedia variant="icon">
           <Wallet />
         </EmptyMedia>
-        <EmptyTitle>Nenhum retrato ainda</EmptyTitle>
+        <EmptyTitle>Nenhum retrato neste período</EmptyTitle>
         <EmptyDescription>
-          Quando o Aurum fizer o primeiro POST em /api/aurum/snapshot, o mês
-          aparece aqui.
+          Troque o mês ou espere o Aurum enviar o retrato desse intervalo.
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
   )
 }
 
-function Month({ body }: { body: SnapshotResponse }) {
-  const { snapshot } = body
-  const weekly = snapshot.boxes.find((box) => box.weekly)?.weekly
-  const chartRows = snapshot.boxes.map((box) => ({
-    name: labelOf(box.id),
-    used: box.spent ?? box.allocated ?? 0,
-    ceiling: box.ceiling ?? 0,
+function PeriodBar({
+  from,
+  to,
+  onChange,
+  onShift,
+}: {
+  from: string
+  to: string
+  onChange: (from: string, to: string) => void
+  onShift: (delta: number) => void
+}) {
+  const month = monthKey(from)
+  const label = isFullMonth(from, to)
+    ? formatMonth(month)
+    : `${formatDate(from)} – ${formatDate(to)}`
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<DateRange | undefined>(() => ({
+    from: parseIsoDate(from),
+    to: parseIsoDate(to),
   }))
-  const commitments = [...snapshot.commitments].sort((a, b) => {
-    if (a.paid !== b.paid) return a.paid ? 1 : -1
-    return a.date.localeCompare(b.date)
-  })
-  const transactions = [...snapshot.transactions].sort((a, b) =>
-    b.date.localeCompare(a.date),
+  const picks = useRef(0)
+
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Mês anterior"
+          onClick={() => onShift(-1)}
+        >
+          <ChevronLeft />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            const bounds = monthBounds(month)
+            onChange(bounds.from, bounds.to)
+          }}
+        >
+          {label}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Próximo mês"
+          onClick={() => onShift(1)}
+        >
+          <ChevronRight />
+        </Button>
+      </div>
+      <Field className="w-auto">
+        <FieldLabel htmlFor="report-range">Período</FieldLabel>
+        <Popover
+          open={open}
+          onOpenChange={(next) => {
+            if (next) {
+              picks.current = 0
+              setDraft({ from: parseIsoDate(from), to: parseIsoDate(to) })
+            }
+            setOpen(next)
+          }}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              id="report-range"
+              type="button"
+              variant="outline"
+              className="justify-start font-normal"
+            >
+              <CalendarIcon data-icon="inline-start" />
+              {formatDate(from)} – {formatDate(to)}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="range"
+              resetOnSelect
+              locale={ptBR}
+              defaultMonth={parseIsoDate(from)}
+              selected={draft}
+              onSelect={(range) => {
+                picks.current += 1
+                setDraft(range)
+                if (!range?.from || !range.to) return
+                onChange(formatIsoDate(range.from), formatIsoDate(range.to))
+                if (picks.current > 1) setOpen(false)
+              }}
+              numberOfMonths={2}
+            />
+          </PopoverContent>
+        </Popover>
+      </Field>
+    </div>
   )
+}
+
+function Month({
+  body,
+  from,
+  to,
+}: {
+  body: SnapshotResponse
+  from: string
+  to: string
+}) {
+  const { snapshot } = body
+  const chartRows = orderedBoxes(snapshot.boxes).map((box) => ({
+    name: labelOf(box.id),
+    used: boxUsed(box, true),
+    ceiling: displayCeiling(box, snapshot.model?.ceilings),
+  }))
+  const showSubbox = snapshot.transactions.some((item) =>
+    Boolean(item.subbox && inRange(item.date, from, to)),
+  )
+  const commitments = snapshot.commitments
+    .filter((item) => inRange(item.date, from, to))
+    .sort((a, b) => {
+      if (a.paid !== b.paid) return a.paid ? 1 : -1
+      return a.date.localeCompare(b.date)
+    })
+  const transactions = snapshot.transactions
+    .filter((item) => inRange(item.date, from, to))
+    .sort((a, b) => b.date.localeCompare(a.date))
 
   return (
     <div className="flex flex-col gap-6">
@@ -177,7 +753,9 @@ function Month({ body }: { body: SnapshotResponse }) {
         {formatDateTime(body.received_at)}
       </p>
 
-      <section className="grid gap-4 lg:grid-cols-4">
+      <FourBoxes snapshot={snapshot} />
+
+      <section className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Renda</CardTitle>
@@ -193,68 +771,38 @@ function Month({ body }: { body: SnapshotResponse }) {
             <p className="text-sm text-muted-foreground">
               de {formatBRL(snapshot.income.expected)} previstos
             </p>
+            {snapshot.income.sources?.length ? (
+              <ul className="flex flex-col gap-2 text-sm">
+                {snapshot.income.sources.map((source, index) => (
+                  <li key={`${source.name}-${index}`} className="flex flex-col gap-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span>{source.name}</span>
+                      <span className="font-medium tabular-nums">
+                        {formatBRL(source.amount)}
+                      </span>
+                    </span>
+                    <span className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                      <Badge variant={source.received ? "success" : "outline"}>
+                        {source.received ? "Recebido" : "Pendente"}
+                      </Badge>
+                      {source.expected_date ? (
+                        <span>{formatDate(source.expected_date)}</span>
+                      ) : null}
+                      {source.note ? <span>{source.note}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </CardContent>
         </Card>
-        {snapshot.boxes.map((box) => {
-          const used = box.spent ?? box.allocated ?? 0
-          const ceiling = box.ceiling ?? 0
-          const over = (box.projected_over ?? 0) > 0 || (ceiling > 0 && used > ceiling)
-          return (
-            <Card key={box.id}>
-              <CardHeader>
-                <CardTitle>{labelOf(box.id)}</CardTitle>
-                <CardDescription>
-                  {box.free != null
-                    ? `${formatBRL(box.free)} livres`
-                    : "Sem saldo livre neste retrato"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-2xl font-medium">{formatBRL(used)}</p>
-                  {over ? <Badge variant="destructive">acima</Badge> : null}
-                </div>
-                <Progress value={percent(used, ceiling)} />
-                <p className="text-sm text-muted-foreground">
-                  teto {formatBRL(ceiling)}
-                </p>
-                {box.children?.length ? (
-                  <ul className="flex flex-col gap-1 text-sm">
-                    {box.children.map((child) => (
-                      <li key={child.id} className="flex justify-between gap-2">
-                        <span>{labelOf(child.id)}</span>
-                        <span className="text-muted-foreground">
-                          {formatBRL(child.done)} / {formatBRL(child.planned)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </CardContent>
-            </Card>
-          )
-        })}
       </section>
-
-      {weekly ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Ritmo da semana</CardTitle>
-            <CardDescription>
-              {formatBRL(weekly.spent)} de {formatBRL(weekly.budget)}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <Progress value={percent(weekly.spent, weekly.budget)} />
-          </CardContent>
-        </Card>
-      ) : null}
 
       {chartRows.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>Caixinhas</CardTitle>
-            <CardDescription>Usado no mês e teto</CardDescription>
+            <CardDescription>Usado ou guardado e teto</CardDescription>
           </CardHeader>
           <CardContent>
             <ChartContainer config={chartConfig} className="aspect-auto h-56 w-full">
@@ -302,8 +850,20 @@ function Month({ body }: { body: SnapshotResponse }) {
               <TableBody>
                 {commitments.map((item) => (
                   <TableRow key={`${item.date}-${item.name}`}>
-                    <TableCell>{formatDate(item.date)}</TableCell>
-                    <TableCell>{item.name}</TableCell>
+                    <TableCell>
+                      <span className="block">{formatDate(item.date)}</span>
+                      {item.date_approx ? (
+                        <span className="text-xs text-muted-foreground">aproximada</span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <span className="block">{item.name}</span>
+                      {item.box === "necessidades" && item.subbox ? (
+                        <span className="text-xs text-muted-foreground">
+                          {labelOf(item.subbox)}
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell>{labelOf(item.box)}</TableCell>
                     <TableCell>{formatBRL(item.amount)}</TableCell>
                     <TableCell>
@@ -322,13 +882,18 @@ function Month({ body }: { body: SnapshotResponse }) {
       <Card>
         <CardHeader>
           <CardTitle>Cartões</CardTitle>
-          <CardDescription>Fatura e parcelas abertas</CardDescription>
+          <CardDescription>
+            Fatura deste mês e os seis meses seguintes
+          </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent className="flex flex-col gap-4">
           {snapshot.cards.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhum cartão.</p>
           ) : (
-            snapshot.cards.map((card) => (
+            <>
+              <CardForecast cards={snapshot.cards} month={snapshot.month} />
+              <div className="grid gap-4 md:grid-cols-2">
+                {snapshot.cards.map((card) => (
               <div key={card.name} className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-medium">{card.name}</p>
@@ -338,15 +903,29 @@ function Month({ body }: { body: SnapshotResponse }) {
                   Fecha dia {card.closing_day ?? "—"} · vence dia{" "}
                   {card.due_day ?? "—"}
                 </p>
-                {card.installments_open?.length ? (
-                  <ul className="flex flex-col gap-1 text-sm">
-                    {card.installments_open.map((item, index) => (
-                      <li key={`${card.name}-${index}`} className="flex justify-between gap-2">
-                        <span>{item.description ?? "Parcela"}</span>
-                        <span>
-                          {formatBRL(item.amount)}
-                          {item.remaining != null ? ` · ${item.remaining}x` : ""}
+                {typeof card.limit === "number" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Limite {formatBRL(card.limit)}
+                  </p>
+                ) : null}
+                <AuthorshipShare card={card} month={snapshot.month} />
+                {visibleInstallments(card, from, to).length ? (
+                  <ul className="flex flex-col gap-2 text-sm">
+                    {visibleInstallments(card, from, to).map((item, index) => (
+                      <li
+                        key={`${card.name}-${index}`}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span>{item.description ?? "Parcela"}</span>
+                          {parcelText(item) ? (
+                            <span className="font-medium">{parcelText(item)}</span>
+                          ) : null}
+                          {isLastParcel(item) ? (
+                            <Badge variant="success">última</Badge>
+                          ) : null}
                         </span>
+                        <span>{formatBRL(item.amount)}</span>
                       </li>
                     ))}
                   </ul>
@@ -354,10 +933,14 @@ function Month({ body }: { body: SnapshotResponse }) {
                   <p className="text-sm text-muted-foreground">Sem parcelas abertas.</p>
                 )}
               </div>
-            ))
+            ))}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
+
+      <CategoryRadars transactions={transactions} month={snapshot.month} />
 
       <Card>
         <CardHeader>
@@ -373,6 +956,7 @@ function Month({ body }: { body: SnapshotResponse }) {
                 <TableRow>
                   <TableHead>Data</TableHead>
                   <TableHead>Caixinha</TableHead>
+                  {showSubbox ? <TableHead>Subcaixinha</TableHead> : null}
                   <TableHead>Categoria</TableHead>
                   <TableHead>Nota</TableHead>
                   <TableHead>Valor</TableHead>
@@ -383,7 +967,10 @@ function Month({ body }: { body: SnapshotResponse }) {
                   <TableRow key={`${item.date}-${item.category}-${index}`}>
                     <TableCell>{formatDate(item.date)}</TableCell>
                     <TableCell>{labelOf(item.box)}</TableCell>
-                    <TableCell>{item.category}</TableCell>
+                    {showSubbox ? (
+                      <TableCell>{item.subbox ? labelOf(item.subbox) : ""}</TableCell>
+                    ) : null}
+                    <TableCell>{labelOf(item.category)}</TableCell>
                     <TableCell>{item.note ?? ""}</TableCell>
                     <TableCell>{formatBRL(item.amount)}</TableCell>
                   </TableRow>
@@ -393,6 +980,17 @@ function Month({ body }: { body: SnapshotResponse }) {
           )}
         </CardContent>
       </Card>
+
+      {typeof snapshot.notes === "string" && snapshot.notes.trim() ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Notas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap">{snapshot.notes}</p>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   )
 }

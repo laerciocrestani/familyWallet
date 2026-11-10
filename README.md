@@ -15,7 +15,7 @@ pnpm install
 pnpm dev
 ```
 
-A tela sobe em `http://127.0.0.1:5173` e a API em `http://127.0.0.1:8787`. No navegador, informe o mesmo token. Ele fica só na aba.
+A tela sobe em `http://127.0.0.1:5173` e a API em `http://127.0.0.1:8788`. No navegador, informe o mesmo token. Ele fica só na aba.
 
 ## Docker
 
@@ -27,9 +27,11 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Abra `http://127.0.0.1:8787`. O container escuta em `0.0.0.0:8787` e a porta publicada fica só em `127.0.0.1`. O SQLite fica no volume `family_data`.
+Abra `http://127.0.0.1:8788`. O container escuta em `0.0.0.0:8788` e a porta publicada fica só em `127.0.0.1`. O SQLite fica no volume `family_data`.
 
-Na Oracle o app sobe no container próprio `family-wallet`, na rede `web` que já existe. Cada push em `main` roda o Action `.github/workflows/deploy.yml`: testa, constrói a imagem arm64 e a VPS só faz o pull. A porta publicada lá também é `127.0.0.1:8787`.
+Na Oracle o app sobe no container próprio `family-wallet`, na rede `web` que já existe. Cada push em `main` roda o Action `.github/workflows/deploy.yml`: testa, constrói a imagem arm64 e a VPS só faz o pull. A porta do app continua em `127.0.0.1:8788`.
+
+O endereço público é `https://familywallet.pidia.com.br`. O Caddy em `proxy/` (`family-proxy`, rede do host) encaminha esse nome para `127.0.0.1:8788`. O firewall da máquina aceita 80 e 443 só dos IPs da Cloudflare. A security list da Oracle precisa deixar essas duas portas chegarem na VPS. O certificado em `proxy/certs/` fica só na máquina.
 
 `HOST` e `DATA_DIR` do `.env` valem para `pnpm dev` e `pnpm start`. Dentro do Compose eles são `0.0.0.0` e `/data`.
 
@@ -82,7 +84,16 @@ Quando o endereço estiver no ar, mande no chat do Aurum:
     { "date": "2026-11-10", "name": "condominio", "amount": 0, "box": "necessidades", "paid": false }
   ],
   "cards": [
-    { "name": "Inter", "closing_day": 1, "due_day": 8, "statement": 0, "installments_open": [] }
+    {
+      "name": "Inter",
+      "closing_day": 1,
+      "due_day": 8,
+      "statement": 0,
+      "installments_open": [
+        { "description": "geladeira", "amount": 180, "index": 3, "count": 6 },
+        { "description": "sofá", "amount": 90, "index": 6, "count": 6 }
+      ]
+    }
   ],
   "transactions": [
     { "date": "2026-11-03", "box": "necessidades", "category": "mercado", "amount": 0, "note": "" }
@@ -90,10 +101,10 @@ Quando o endereço estiver no ar, mande no chat do Aurum:
 }
 ```
 
-`as_of` tem de cair dentro de `month`. Campos extras são guardados.
+`as_of` tem de cair dentro de `month`. Campos extras são guardados. Em cada parcela, `index` é a parcela atual e `count` é o total: a tela mostra `3/6`. Quando os dois são iguais, a parcela ganha a tag verde "última". A tela também lê `GET /api/aurum/snapshot?from=AAAA-MM-DD&to=AAAA-MM-DD` e devolve o último retrato de cada mês do intervalo.
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/api/aurum/snapshot \
+curl -s -X POST http://127.0.0.1:8788/api/aurum/snapshot \
   -H "Authorization: Bearer $AURUM_TOKEN" \
   -H "Content-Type: application/json" \
   -d @snapshot.json

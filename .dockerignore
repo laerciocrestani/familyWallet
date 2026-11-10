@@ -9,3 +9,4 @@ data
 !.env.example
 *.sqlite
 *.md
+proxy

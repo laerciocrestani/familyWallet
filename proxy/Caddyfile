@@ -1,0 +1,14 @@
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
+http://familywallet.pidia.com.br {
+	reverse_proxy 127.0.0.1:8788
+}
+
+https://familywallet.pidia.com.br {
+	tls /etc/caddy/certs/origin.crt /etc/caddy/certs/origin.key
+	reverse_proxy 127.0.0.1:8788
+}
