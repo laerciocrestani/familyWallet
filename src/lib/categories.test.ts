@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { categoryRadarSet, categoryTotals } from "./categories.ts"
+import { boxSpendRadar, categoryTotals } from "./categories.ts"
 
 describe("categorias do mês", () => {
   it("soma a mesma categoria e ordena pelo nome", () => {
@@ -34,21 +34,62 @@ describe("categorias do mês", () => {
     assert.deepEqual(categoryTotals([]), [])
   })
 
-  it("separa necessidades e desejos e soma as duas no geral", () => {
-    const set = categoryRadarSet([
-      { box: "necessidades", category: "carro", amount: 1000 },
-      { box: "desejos", category: "carro", amount: 70 },
-      { box: "desejos", category: "restaurante", amount: 10 },
-      { box: "futuro", category: "reserva", amount: 500 },
+  it("deixa mercado crescente e pensão no mesmo nível", () => {
+    const points = boxSpendRadar(
+      "necessidades",
+      [
+        { box: "necessidades", category: "mercado", amount: 40, subbox: "mercado" },
+        { box: "necessidades", category: "mercado", amount: 17, subbox: "mercado" },
+        { box: "necessidades", category: "consulta", amount: 34, subbox: "saude" },
+        { box: "desejos", category: "lazer", amount: 80 },
+      ],
+      [
+        { box: "necessidades", name: "Pensão", amount: 1000, subbox: "familia_educacao" },
+        { box: "necessidades", name: "Cartão de Todos", amount: 33.4, subbox: "saude" },
+        { box: "desejos", name: "Bento Vôlei", amount: 150 },
+        { box: "futuro", name: "Reserva", amount: 200 },
+      ],
+      [
+        { key: "mercado", name: "Mercado", ceiling: 2300 },
+        { key: "saude", name: "Saúde", ceiling: 350 },
+        { key: "familia_educacao", name: "Família e educação", ceiling: 2810 },
+        { key: "pessoais", name: "Pessoais", ceiling: 120 },
+      ],
+    )
+    assert.deepEqual(points, [
+      { label: "Família e educação", projected: 1000, actual: 1000 },
+      { label: "Mercado", projected: 2300, actual: 57 },
+      { label: "Pessoais", projected: 120, actual: 0 },
+      { label: "Saúde", projected: 67.4, actual: 67.4 },
     ])
-    assert.deepEqual(set.necessidades, [{ category: "carro", amount: 1000 }])
-    assert.deepEqual(set.desejos, [
-      { category: "carro", amount: 70 },
-      { category: "restaurante", amount: 10 },
-    ])
-    assert.deepEqual(set.geral, [
-      { category: "carro", amount: 1070 },
-      { category: "restaurante", amount: 10 },
-    ])
+  })
+
+  it("trata desejos fixos com projeção igual ao atual", () => {
+    assert.deepEqual(
+      boxSpendRadar(
+        "desejos",
+        [],
+        [
+          { box: "desejos", name: "Bento Vôlei", amount: 150 },
+          { box: "desejos", name: "Fatura Inter", amount: 922.11 },
+        ],
+      ),
+      [
+        { label: "Bento Vôlei", projected: 150, actual: 150 },
+        { label: "Fatura Inter", projected: 922.11, actual: 922.11 },
+      ],
+    )
+  })
+
+  it("não desenha eixo quando projeção e atual fecham em zero", () => {
+    assert.deepEqual(
+      boxSpendRadar(
+        "necessidades",
+        [],
+        [],
+        [{ key: "pessoais", name: "Pessoais", ceiling: 0 }],
+      ),
+      [],
+    )
   })
 })

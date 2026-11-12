@@ -38,7 +38,7 @@ function LineRows({ lines }: { lines: readonly DetailLine[] }) {
               ) : null}
               {line.dateApprox ? <span>aproximada</span> : null}
               {line.paid == null ? null : (
-                <Badge variant={line.paid ? "secondary" : "outline"}>
+                <Badge variant={line.paid ? "success" : "outline"}>
                   {line.paid ? "Pago" : "A pagar"}
                 </Badge>
               )}

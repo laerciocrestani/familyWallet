@@ -17,6 +17,7 @@ const LABELS: Record<string, string> = {
   amortizacao_apto: "Amortização do apto",
   reserva: "Reserva e investimentos",
   aposentadoria: "Aposentadoria",
+  consulta: "Consulta",
   combustivel: "Combustível",
   restaurante: "Restaurante",
   presente: "Presente",

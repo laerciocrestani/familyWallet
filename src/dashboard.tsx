@@ -20,6 +20,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -62,7 +63,7 @@ import {
   parcelParts,
   projectSharedCards,
 } from "@/lib/cards"
-import { categoryRadarSet, type CategoryTotal } from "@/lib/categories"
+import { boxSpendRadar, type RadarPoint } from "@/lib/categories"
 import { labelOf } from "@/lib/labels"
 import { formatBRL, formatDate, formatDateTime } from "@/lib/money"
 import {
@@ -224,173 +225,161 @@ function CardForecast({
   )
 }
 
-function CategoryRadarCard({
+function RadarNameTick({
+  x = 0,
+  y = 0,
+  textAnchor = "middle",
+  payload,
+}: {
+  x?: string | number
+  y?: string | number
+  textAnchor?: "start" | "middle" | "end" | "inherit"
+  payload?: { value?: string }
+}) {
+  const full = payload?.value ?? ""
+  const text = full.length > 18 ? `${full.slice(0, 16)}…` : full
+  return (
+    <text
+      x={Number(x)}
+      y={Number(y)}
+      textAnchor={textAnchor}
+      fontSize={11}
+      fill="var(--muted-foreground)"
+    >
+      {text}
+    </text>
+  )
+}
+
+const spendRadarConfig = {
+  projected: { label: "Projeção", color: "var(--chart-1)" },
+  actual: { label: "Atual", color: "var(--chart-2)" },
+} satisfies ChartConfig
+
+function radarLabel(label: string) {
+  return labelOf(label)
+}
+
+function SpendRadarCard({
   heading,
-  detail,
-  rows,
   period,
-  color,
-  swatch,
-  compact = false,
+  points,
 }: {
   heading: string
-  detail: string
-  rows: CategoryTotal[]
   period: string
-  color: string
-  swatch: string
-  compact?: boolean
+  points: RadarPoint[]
 }) {
-  const points = rows.map((item) => ({
-    category: labelOf(item.category),
-    amount: item.amount,
+  const data = points.map((point) => ({
+    ...point,
+    label: radarLabel(point.label),
   }))
-  const ranked = [...points].sort(
-    (a, b) => b.amount - a.amount || a.category.localeCompare(b.category, "pt-BR"),
-  )
-  const total = points.reduce((sum, row) => cents(sum + row.amount), 0)
-  const config = {
-    amount: { label: "Gasto", color },
-  } satisfies ChartConfig
+  const projected = data.reduce((sum, point) => cents(sum + point.projected), 0)
+  const actual = data.reduce((sum, point) => cents(sum + point.actual), 0)
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="items-center pb-4">
         <CardTitle>{heading}</CardTitle>
-        <CardDescription>
-          {detail}
-          {points.length > 0 ? ` · ${formatBRL(total)}` : ""}
-        </CardDescription>
+        <CardDescription>Projeção do mês e o gasto atual</CardDescription>
       </CardHeader>
       <CardContent>
-        {points.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhum lançamento neste período.
-          </p>
+        {data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum gasto neste mês.</p>
         ) : (
-          <div className="@container w-full">
-            <div
-              className={cn(
-                "flex w-full flex-col items-center gap-4",
-                compact
-                  ? "@min-[28rem]:flex-row @min-[28rem]:items-center"
-                  : "@3xl:flex-row @3xl:justify-center @3xl:gap-6",
-              )}
+          <ChartContainer
+            config={spendRadarConfig}
+            aria-label={`Projeção e gasto atual de ${heading} em ${period}`}
+            className="mx-auto aspect-square w-full max-h-[420px] [&_.recharts-polar-angle-axis-tick_text]:fill-muted-foreground"
+          >
+            <RadarChart
+              data={data}
+              outerRadius="62%"
+              margin={{ top: 28, right: 72, bottom: 12, left: 72 }}
             >
-              <ChartContainer
-                config={config}
-                aria-label={`Categorias de ${heading} em ${period}`}
-                className={cn(
-                  "aspect-square w-full [&_.recharts-polar-angle-axis-tick_text]:fill-muted-foreground",
-                  compact ? "max-w-72" : "max-w-sm",
-                )}
-              >
-                <RadarChart
-                  data={points}
-                  outerRadius="70%"
-                  margin={
-                    compact
-                      ? { top: 20, right: 76, bottom: 20, left: 76 }
-                      : { top: 28, right: 88, bottom: 28, left: 88 }
-                  }
-                >
-                  <ChartTooltip
-                    cursor={false}
-                    content={
-                      <ChartTooltipContent
-                        formatter={(value) => (
-                          <span className="font-mono font-medium tabular-nums">
-                            {formatBRL(Number(value))}
-                          </span>
-                        )}
-                      />
-                    }
+              <ChartTooltip
+                cursor={false}
+                content={
+                  <ChartTooltipContent
+                    indicator="line"
+                    formatter={(value, name) => (
+                      <span className="flex w-full justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          {spendRadarConfig[name as keyof typeof spendRadarConfig]?.label ??
+                            String(name)}
+                        </span>
+                        <span className="font-mono font-medium tabular-nums">
+                          {formatBRL(Number(value))}
+                        </span>
+                      </span>
+                    )}
                   />
-                  <PolarAngleAxis dataKey="category" />
-                  <PolarGrid />
-                  <Radar
-                    dataKey="amount"
-                    fill="var(--color-amount)"
-                    fillOpacity={0.6}
-                    stroke="var(--color-amount)"
-                    dot={{
-                      r: 4,
-                      fillOpacity: 1,
-                    }}
-                  />
-                </RadarChart>
-              </ChartContainer>
-              <ul
-                aria-label={`Valores de ${heading} em ${period}`}
-                className={cn(
-                  "flex w-full flex-col gap-2",
-                  compact ? "min-w-0 @min-[28rem]:flex-1" : "max-w-sm @3xl:w-64 @3xl:shrink-0",
-                )}
-              >
-                {ranked.map((row) => (
-                  <li
-                    key={row.category}
-                    className="flex items-baseline justify-between gap-3"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className={cn("size-2 shrink-0 rounded-full", swatch)} />
-                      <span className="truncate">{row.category}</span>
-                    </span>
-                    <span className="font-mono font-medium tabular-nums">
-                      {formatBRL(row.amount)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+                }
+              />
+              <PolarGrid />
+              <PolarAngleAxis dataKey="label" tick={RadarNameTick} />
+              <Radar
+                dataKey="projected"
+                fill="var(--color-projected)"
+                fillOpacity={0.45}
+                stroke="var(--color-projected)"
+                dot={{ r: 3, fillOpacity: 1 }}
+              />
+              <Radar
+                dataKey="actual"
+                fill="var(--color-actual)"
+                fillOpacity={0.7}
+                stroke="var(--color-actual)"
+                dot={{ r: 3, fillOpacity: 1 }}
+              />
+              <ChartLegend content={<ChartLegendContent />} />
+            </RadarChart>
+          </ChartContainer>
         )}
       </CardContent>
+      {data.length > 0 ? (
+        <CardFooter className="flex-col gap-1 text-sm">
+          <p className="font-medium">
+            Atual {formatBRL(actual)} · Projeção {formatBRL(projected)}
+          </p>
+          <p className="text-muted-foreground">{period}</p>
+        </CardFooter>
+      ) : null}
     </Card>
   )
 }
 
 function CategoryRadars({
+  boxes,
   transactions,
+  commitments,
   month,
 }: {
+  boxes: Snapshot["boxes"]
   transactions: Snapshot["transactions"]
+  commitments: Snapshot["commitments"]
   month: string
 }) {
-  const groups = categoryRadarSet(transactions)
   const period = formatMonth(month)
 
   return (
-    <>
-      <CategoryRadarCard
-        heading="Necessidades e desejos"
-        detail="Cruzamento geral dos gastos neste mês"
-        rows={groups.geral}
-        period={period}
-        color="var(--chart-1)"
-        swatch="bg-chart-1"
-      />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <CategoryRadarCard
-          heading="Necessidades"
-          detail="Gastos de necessidades neste mês"
-          rows={groups.necessidades}
-          period={period}
-          color="var(--chart-2)"
-          swatch="bg-chart-2"
-          compact
-        />
-        <CategoryRadarCard
-          heading="Desejos"
-          detail="Gastos de desejos neste mês"
-          rows={groups.desejos}
-          period={period}
-          color="var(--chart-3)"
-          swatch="bg-chart-3"
-          compact
-        />
-      </div>
-    </>
+    <div className="grid gap-6 lg:grid-cols-2">
+      {(["necessidades", "desejos"] as const).map((id) => {
+        const box = boxes.find((item) => item.id === id)
+        return (
+          <SpendRadarCard
+            key={id}
+            heading={labelOf(id)}
+            period={period}
+            points={boxSpendRadar(
+              id,
+              transactions,
+              commitments,
+              box?.subboxes ?? [],
+            )}
+          />
+        )
+      })}
+    </div>
   )
 }
 
@@ -867,7 +856,7 @@ function Month({
                     <TableCell>{labelOf(item.box)}</TableCell>
                     <TableCell>{formatBRL(item.amount)}</TableCell>
                     <TableCell>
-                      <Badge variant={item.paid ? "secondary" : "outline"}>
+                      <Badge variant={item.paid ? "success" : "outline"}>
                         {item.paid ? "Pago" : "A pagar"}
                       </Badge>
                     </TableCell>
@@ -940,7 +929,12 @@ function Month({
         </CardContent>
       </Card>
 
-      <CategoryRadars transactions={transactions} month={snapshot.month} />
+      <CategoryRadars
+        boxes={snapshot.boxes}
+        transactions={transactions}
+        commitments={commitments}
+        month={snapshot.month}
+      />
 
       <Card>
         <CardHeader>
